@@ -79,11 +79,10 @@ function getTextVisibleLength(text) {
 
 function getTextOffsetForVisibleOffset(text, visibleOffset) {
   const offset = Math.max(0, visibleOffset ?? 0);
-  const regex = new RegExp(emojiReplacementRegex, "g");
   let actualIndex = 0;
   let visibleIndex = 0;
 
-  for (const match of text.matchAll(regex)) {
+  for (const match of text.matchAll(UNICODE_EMOJI_REGEX)) {
     const emojiIndex = match.index;
     const plainTextLength = emojiIndex - actualIndex;
 
@@ -122,10 +121,7 @@ function getSelectionOffset(container) {
 }
 
 function serializeRangeContents(range) {
-  const fragment = range.cloneContents();
-  const wrapper = document.createElement("div");
-  wrapper.appendChild(fragment);
-  return getStats(wrapper).length;
+  return getStats(range.cloneContents()).length;
 }
 
 function setSelectionOffset(container, targetOffset) {
@@ -192,7 +188,6 @@ export default class BoostEditor extends Component {
   #isComposing = false;
   #isApplyingValidation = false;
   #mutationObserver = null;
-  #lastValidatedHTML = "";
   #previousHTML = "";
   #previousSelectionOffset = 0;
 
@@ -206,7 +201,6 @@ export default class BoostEditor extends Component {
     this.#editor = element;
     this.#observeEditorMutations();
     this.#previousHTML = element.innerHTML;
-    this.#lastValidatedHTML = element.innerHTML;
     next(() => element.focus());
   }
 
@@ -276,9 +270,9 @@ export default class BoostEditor extends Component {
     this.#editor.appendChild(createEmojiImg(code));
     placeCursorAtEnd(this.#editor);
     this.#previousHTML = this.#editor.innerHTML;
-    this.#lastValidatedHTML = this.#editor.innerHTML;
-    this.#previousSelectionOffset = getStats(this.#editor).length;
-    this.#syncEditorState(getStats(this.#editor));
+    const newStats = getStats(this.#editor);
+    this.#previousSelectionOffset = newStats.length;
+    this.#syncEditorState(newStats);
   }
 
   @action
@@ -298,7 +292,7 @@ export default class BoostEditor extends Component {
     }
 
     const currentHTML = this.#editor.innerHTML;
-    if (currentHTML === this.#lastValidatedHTML) {
+    if (currentHTML === this.#previousHTML) {
       return;
     }
 
@@ -311,13 +305,11 @@ export default class BoostEditor extends Component {
       if (stats.length > MAX_LENGTH || stats.emojiCount > MAX_EMOJI) {
         this.#editor.innerHTML = this.#previousHTML;
         setSelectionOffset(this.#editor, this.#previousSelectionOffset);
-        this.#lastValidatedHTML = this.#editor.innerHTML;
         this.#syncEditorState(getStats(this.#editor));
         return;
       }
 
       this.#previousHTML = this.#editor.innerHTML;
-      this.#lastValidatedHTML = this.#editor.innerHTML;
       this.#previousSelectionOffset = Math.min(
         selectionOffset ?? stats.length,
         stats.length
