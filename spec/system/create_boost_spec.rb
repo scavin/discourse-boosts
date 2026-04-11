@@ -39,4 +39,24 @@ describe "Creating a boost" do
 
     expect(boost_page).to have_editor_text("1234567890123456")
   end
+
+  it "enforces the word limit after paste finalizes" do
+    topic_page.visit_topic(topic)
+
+    boost_page.click_post_menu_boost_button(post)
+    boost_page.fill_in_boost("1234567890123456")
+    boost_page.paste_boost("7")
+
+    expect(boost_page).to have_editor_text("1234567890123456")
+  end
+
+  it "enforces the word limit after programmatic updates" do
+    topic_page.visit_topic(topic)
+
+    boost_page.click_post_menu_boost_button(post)
+    boost_page.fill_in_boost("1234567890123456")
+    boost_page.programmatically_set_boost_text("12345678901234567")
+
+    expect(boost_page).to have_editor_text("1234567890123456")
+  end
 end

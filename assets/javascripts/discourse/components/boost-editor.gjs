@@ -82,22 +82,31 @@ export default class BoostEditor extends Component {
 
   #editor = null;
   #isComposing = false;
+  #isApplyingValidation = false;
+  #mutationObserver = null;
+  #pendingValidation = false;
   #previousHTML = "";
+
+  willDestroy() {
+    super.willDestroy(...arguments);
+    this.#mutationObserver?.disconnect();
+  }
 
   @action
   setup(element) {
     this.#editor = element;
+    this.#observeEditorMutations();
     next(() => element.focus());
   }
 
   @action
-  handleInput(event) {
-    if (event?.isComposing || this.#isComposing) {
+  handleInput() {
+    if (this.#isComposing) {
       this.#syncEditorState(getStats(this.#editor));
       return;
     }
 
-    this.#applyFinalizedInput();
+    this.#scheduleFinalizedValidation();
   }
 
   @action
@@ -108,11 +117,7 @@ export default class BoostEditor extends Component {
   @action
   handleCompositionEnd() {
     this.#isComposing = false;
-    next(() => {
-      if (!this.#isComposing) {
-        this.#applyFinalizedInput();
-      }
-    });
+    this.#scheduleFinalizedValidation();
   }
 
   @action
@@ -131,6 +136,9 @@ export default class BoostEditor extends Component {
     event.preventDefault();
     const text = event.clipboardData.getData("text/plain");
     document.execCommand("insertText", false, text);
+    if (!this.#isComposing) {
+      this.#scheduleFinalizedValidation();
+    }
   }
 
   @action
@@ -169,19 +177,60 @@ export default class BoostEditor extends Component {
       stats.length + spaceNeeded <= MAX_LENGTH && stats.emojiCount < MAX_EMOJI;
   }
 
-  #applyFinalizedInput() {
-    this.#processEmojiShortcodes();
-
-    const stats = getStats(this.#editor);
-    if (stats.length > MAX_LENGTH || stats.emojiCount > MAX_EMOJI) {
-      this.#editor.innerHTML = this.#previousHTML;
-      placeCursorAtEnd(this.#editor);
-      this.#syncEditorState(getStats(this.#editor));
+  #scheduleFinalizedValidation() {
+    if (this.#pendingValidation || this.#isApplyingValidation) {
       return;
     }
 
-    this.#previousHTML = this.#editor.innerHTML;
-    this.#syncEditorState(stats);
+    this.#pendingValidation = true;
+    next(() => {
+      this.#pendingValidation = false;
+
+      if (!this.#isComposing) {
+        this.#applyFinalizedInput();
+      }
+    });
+  }
+
+  #applyFinalizedInput() {
+    this.#isApplyingValidation = true;
+    try {
+      this.#processEmojiShortcodes();
+
+      const stats = getStats(this.#editor);
+      if (stats.length > MAX_LENGTH || stats.emojiCount > MAX_EMOJI) {
+        this.#editor.innerHTML = this.#previousHTML;
+        placeCursorAtEnd(this.#editor);
+        this.#syncEditorState(getStats(this.#editor));
+        return;
+      }
+
+      this.#previousHTML = this.#editor.innerHTML;
+      this.#syncEditorState(stats);
+    } finally {
+      this.#isApplyingValidation = false;
+    }
+  }
+
+  #observeEditorMutations() {
+    this.#mutationObserver = new MutationObserver(() => {
+      if (this.#isApplyingValidation) {
+        return;
+      }
+
+      if (this.#isComposing) {
+        this.#syncEditorState(getStats(this.#editor));
+        return;
+      }
+
+      this.#scheduleFinalizedValidation();
+    });
+
+    this.#mutationObserver.observe(this.#editor, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
   }
 
   #syncEditorState(stats) {

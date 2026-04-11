@@ -46,6 +46,28 @@ module PageObjects
         self
       end
 
+      def paste_boost(text)
+        page.execute_script(<<~JS)
+          const editor = document.querySelector(".discourse-boosts__input-container .discourse-boosts__input");
+          editor.focus();
+          const dataTransfer = new DataTransfer();
+          dataTransfer.setData("text/plain", #{text.to_json});
+          editor.dispatchEvent(new ClipboardEvent("paste", {
+            bubbles: true,
+            clipboardData: dataTransfer
+          }));
+        JS
+        self
+      end
+
+      def programmatically_set_boost_text(text)
+        page.execute_script(<<~JS)
+          const editor = document.querySelector(".discourse-boosts__input-container .discourse-boosts__input");
+          editor.textContent = #{text.to_json};
+        JS
+        self
+      end
+
       def submit_boost
         find(".discourse-boosts__submit").click
         self
