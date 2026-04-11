@@ -22,6 +22,10 @@ module PageObjects
         has_css?(".discourse-boosts__input-container .discourse-boosts__input", text: text)
       end
 
+      def has_editor?
+        has_css?(".discourse-boosts__input-container .discourse-boosts__input")
+      end
+
       def start_boost_composition(text)
         page.execute_script(<<~JS)
           const editor = document.querySelector(".discourse-boosts__input-container .discourse-boosts__input");
@@ -46,6 +50,25 @@ module PageObjects
         self
       end
 
+      def press_boost_key(key, is_composing: false)
+        page.execute_script(<<~JS)
+          const editor = document.querySelector(".discourse-boosts__input-container .discourse-boosts__input");
+          editor.focus();
+          const event = new KeyboardEvent("keydown", {
+            bubbles: true,
+            key: #{key.to_json}
+          });
+
+          if (#{is_composing}) {
+            Object.defineProperty(event, "isComposing", { configurable: true, get() { return true; } });
+            Object.defineProperty(event, "keyCode", { configurable: true, get() { return 229; } });
+          }
+
+          editor.dispatchEvent(event);
+        JS
+        self
+      end
+
       def paste_boost(text)
         page.execute_script(<<~JS)
           const editor = document.querySelector(".discourse-boosts__input-container .discourse-boosts__input");
@@ -60,12 +83,100 @@ module PageObjects
         self
       end
 
+      def programmatically_set_boost_html(html, selection_offset: nil)
+        page.execute_script(<<~JS)
+          const editor = document.querySelector(".discourse-boosts__input-container .discourse-boosts__input");
+          editor.innerHTML = #{html.to_json};
+
+          if (#{!selection_offset.nil?}) {
+            const targetOffset = #{selection_offset || 0};
+            const selection = window.getSelection();
+            const range = document.createRange();
+            let traversed = 0;
+
+            for (const node of editor.childNodes) {
+              if (node.nodeType === Node.TEXT_NODE) {
+                const textLength = node.textContent.length;
+                if (targetOffset <= traversed + textLength) {
+                  range.setStart(node, targetOffset - traversed);
+                  range.collapse(true);
+                  selection.removeAllRanges();
+                  selection.addRange(range);
+                  break;
+                }
+                traversed += textLength;
+              } else if (node.nodeName === "IMG" && node.classList.contains("emoji")) {
+                if (targetOffset <= traversed + 1) {
+                  if (targetOffset === traversed) {
+                    range.setStartBefore(node);
+                  } else {
+                    range.setStartAfter(node);
+                  }
+                  range.collapse(true);
+                  selection.removeAllRanges();
+                  selection.addRange(range);
+                  break;
+                }
+                traversed += 1;
+              }
+            }
+          }
+        JS
+        self
+      end
+
       def programmatically_set_boost_text(text)
         page.execute_script(<<~JS)
           const editor = document.querySelector(".discourse-boosts__input-container .discourse-boosts__input");
           editor.textContent = #{text.to_json};
         JS
         self
+      end
+
+      def editor_selection_offset
+        page.evaluate_script(<<~JS)
+          (() => {
+            const editor = document.querySelector(".discourse-boosts__input-container .discourse-boosts__input");
+            const selection = window.getSelection();
+
+            if (!selection || selection.rangeCount === 0) {
+              return null;
+            }
+
+            const range = selection.getRangeAt(0);
+            if (!editor.contains(range.startContainer)) {
+              return null;
+            }
+
+            const preRange = document.createRange();
+            preRange.selectNodeContents(editor);
+            preRange.setEnd(range.startContainer, range.startOffset);
+
+            const wrapper = document.createElement("div");
+            wrapper.appendChild(preRange.cloneContents());
+
+            let offset = 0;
+            for (const node of wrapper.childNodes) {
+              if (node.nodeType === Node.TEXT_NODE) {
+                offset += node.textContent.length;
+              } else if (node.nodeName === "IMG" && node.classList.contains("emoji")) {
+                offset += 1;
+              }
+            }
+
+            return offset;
+          })()
+        JS
+      end
+
+      def has_editor_selection_offset?(offset)
+        page.document.synchronize do
+          raise Capybara::ExpectationNotMet unless editor_selection_offset == offset
+        end
+
+        true
+      rescue Capybara::ExpectationNotMet
+        false
       end
 
       def submit_boost

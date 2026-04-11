@@ -27,12 +27,8 @@ function getStats(element) {
     if (node.nodeType === Node.TEXT_NODE) {
       const text = node.textContent;
       const unicodeMatches = text.match(UNICODE_EMOJI_REGEX);
-      if (unicodeMatches) {
-        emojiCount += unicodeMatches.length;
-        length += text.replace(UNICODE_EMOJI_REGEX, "x").length;
-      } else {
-        length += text.length;
-      }
+      emojiCount += unicodeMatches?.length || 0;
+      length += getTextVisibleLength(text);
     } else if (node.nodeName === "IMG" && node.classList.contains("emoji")) {
       length += 1;
       emojiCount += 1;
@@ -77,6 +73,36 @@ function placeCursorAtEnd(element) {
   sel.addRange(range);
 }
 
+function getTextVisibleLength(text) {
+  return text.replace(UNICODE_EMOJI_REGEX, "x").length;
+}
+
+function getTextOffsetForVisibleOffset(text, visibleOffset) {
+  const offset = Math.max(0, visibleOffset ?? 0);
+  const regex = new RegExp(emojiReplacementRegex, "g");
+  let actualIndex = 0;
+  let visibleIndex = 0;
+
+  for (const match of text.matchAll(regex)) {
+    const emojiIndex = match.index;
+    const plainTextLength = emojiIndex - actualIndex;
+
+    if (offset <= visibleIndex + plainTextLength) {
+      return actualIndex + (offset - visibleIndex);
+    }
+
+    visibleIndex += plainTextLength;
+    if (offset <= visibleIndex + 1) {
+      return emojiIndex + match[0].length;
+    }
+
+    actualIndex = emojiIndex + match[0].length;
+    visibleIndex += 1;
+  }
+
+  return Math.min(text.length, actualIndex + (offset - visibleIndex));
+}
+
 function getSelectionOffset(container) {
   const selection = window.getSelection();
 
@@ -99,7 +125,7 @@ function serializeRangeContents(range) {
   const fragment = range.cloneContents();
   const wrapper = document.createElement("div");
   wrapper.appendChild(fragment);
-  return serialize(wrapper).length;
+  return getStats(wrapper).length;
 }
 
 function setSelectionOffset(container, targetOffset) {
@@ -107,12 +133,33 @@ function setSelectionOffset(container, targetOffset) {
   const range = document.createRange();
   const offset = Math.max(0, targetOffset ?? 0);
   let traversed = 0;
+  const walker = document.createTreeWalker(
+    container,
+    NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT,
+    {
+      acceptNode(node) {
+        if (node.nodeType === Node.TEXT_NODE) {
+          return NodeFilter.FILTER_ACCEPT;
+        }
 
-  for (const node of container.childNodes) {
+        if (node.nodeName === "IMG" && node.classList.contains("emoji")) {
+          return NodeFilter.FILTER_ACCEPT;
+        }
+
+        return NodeFilter.FILTER_SKIP;
+      },
+    }
+  );
+
+  let node;
+  while ((node = walker.nextNode())) {
     if (node.nodeType === Node.TEXT_NODE) {
-      const textLength = node.textContent.length;
+      const textLength = getTextVisibleLength(node.textContent);
       if (offset <= traversed + textLength) {
-        range.setStart(node, offset - traversed);
+        range.setStart(
+          node,
+          getTextOffsetForVisibleOffset(node.textContent, offset - traversed)
+        );
         range.collapse(true);
         selection.removeAllRanges();
         selection.addRange(range);
@@ -121,7 +168,11 @@ function setSelectionOffset(container, targetOffset) {
       traversed += textLength;
     } else if (node.nodeName === "IMG" && node.classList.contains("emoji")) {
       if (offset <= traversed + 1) {
-        range.setStartBefore(node);
+        if (offset === traversed) {
+          range.setStartBefore(node);
+        } else {
+          range.setStartAfter(node);
+        }
         range.collapse(true);
         selection.removeAllRanges();
         selection.addRange(range);
@@ -182,6 +233,10 @@ export default class BoostEditor extends Component {
 
   @action
   handleKeyDown(event) {
+    if (this.#isComposing || event.isComposing || event.keyCode === 229) {
+      return;
+    }
+
     if (event.key === "Enter") {
       event.preventDefault();
       this.args.onSubmit?.();

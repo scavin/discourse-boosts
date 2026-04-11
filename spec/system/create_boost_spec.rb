@@ -40,6 +40,27 @@ describe "Creating a boost" do
     expect(boost_page).to have_editor_text("1234567890123456")
   end
 
+  it "does not submit while IME composition is active" do
+    topic_page.visit_topic(topic)
+
+    boost_page.click_post_menu_boost_button(post)
+    boost_page.start_boost_composition("ok")
+    boost_page.press_boost_key("Enter", is_composing: true)
+
+    expect(boost_page).to have_editor
+    expect(boost_page).to have_no_boost(post)
+  end
+
+  it "does not close while IME composition is active" do
+    topic_page.visit_topic(topic)
+
+    boost_page.click_post_menu_boost_button(post)
+    boost_page.start_boost_composition("ok")
+    boost_page.press_boost_key("Escape", is_composing: true)
+
+    expect(boost_page).to have_editor
+  end
+
   it "enforces the word limit after paste finalizes" do
     topic_page.visit_topic(topic)
 
@@ -58,5 +79,22 @@ describe "Creating a boost" do
     boost_page.programmatically_set_boost_text("12345678901234567")
 
     expect(boost_page).to have_editor_text("1234567890123456")
+  end
+
+  it "restores the cursor position after rolling back invalid emoji input" do
+    topic_page.visit_topic(topic)
+
+    boost_page.click_post_menu_boost_button(post)
+    boost_page.programmatically_set_boost_html(
+      'a<img class="emoji" alt=":heart:" title=":heart:" src="/images/emoji/twitter/heart.png">b',
+      selection_offset: 2
+    )
+
+    expect(boost_page).to have_editor_selection_offset(2)
+
+    boost_page.programmatically_set_boost_text("a:heart:b1234567890123456")
+
+    expect(boost_page).to have_editor_text("ab")
+    expect(boost_page).to have_editor_selection_offset(2)
   end
 end
