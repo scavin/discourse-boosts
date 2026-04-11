@@ -25,4 +25,18 @@ describe "Creating a boost" do
     expect(boost_page).to have_no_post_menu_boost_button(post)
     expect(boost_page).to have_no_boosts_list_boost_button(post)
   end
+
+  it "defers the word limit until IME composition ends" do
+    topic_page.visit_topic(topic)
+
+    boost_page.click_post_menu_boost_button(post)
+    boost_page.fill_in_boost("1234567890123456")
+    boost_page.start_boost_composition("12345678901234567")
+
+    expect(boost_page).to have_editor_text("12345678901234567")
+
+    boost_page.end_boost_composition
+
+    expect(boost_page).to have_editor_text("1234567890123456")
+  end
 end

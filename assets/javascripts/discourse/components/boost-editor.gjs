@@ -81,6 +81,7 @@ export default class BoostEditor extends Component {
   @tracked canAddEmoji = true;
 
   #editor = null;
+  #isComposing = false;
   #previousHTML = "";
 
   @action
@@ -90,20 +91,28 @@ export default class BoostEditor extends Component {
   }
 
   @action
-  handleInput() {
-    this.#processEmojiShortcodes();
-
-    const stats = getStats(this.#editor);
-    if (stats.length > MAX_LENGTH || stats.emojiCount > MAX_EMOJI) {
-      this.#editor.innerHTML = this.#previousHTML;
-      placeCursorAtEnd(this.#editor);
+  handleInput(event) {
+    if (event?.isComposing || this.#isComposing) {
+      this.#syncEditorState(getStats(this.#editor));
       return;
     }
 
-    this.#previousHTML = this.#editor.innerHTML;
-    const value = serialize(this.#editor);
-    this.#updateCanAddEmoji(stats);
-    this.args.onChange?.(value);
+    this.#applyFinalizedInput();
+  }
+
+  @action
+  handleCompositionStart() {
+    this.#isComposing = true;
+  }
+
+  @action
+  handleCompositionEnd() {
+    this.#isComposing = false;
+    next(() => {
+      if (!this.#isComposing) {
+        this.#applyFinalizedInput();
+      }
+    });
   }
 
   @action
@@ -160,6 +169,27 @@ export default class BoostEditor extends Component {
       stats.length + spaceNeeded <= MAX_LENGTH && stats.emojiCount < MAX_EMOJI;
   }
 
+  #applyFinalizedInput() {
+    this.#processEmojiShortcodes();
+
+    const stats = getStats(this.#editor);
+    if (stats.length > MAX_LENGTH || stats.emojiCount > MAX_EMOJI) {
+      this.#editor.innerHTML = this.#previousHTML;
+      placeCursorAtEnd(this.#editor);
+      this.#syncEditorState(getStats(this.#editor));
+      return;
+    }
+
+    this.#previousHTML = this.#editor.innerHTML;
+    this.#syncEditorState(stats);
+  }
+
+  #syncEditorState(stats) {
+    const value = serialize(this.#editor);
+    this.#updateCanAddEmoji(stats);
+    this.args.onChange?.(value);
+  }
+
   #processEmojiShortcodes() {
     const walker = document.createTreeWalker(
       this.#editor,
@@ -213,6 +243,8 @@ export default class BoostEditor extends Component {
       data-placeholder={{@placeholder}}
       {{didInsert this.setup}}
       {{on "input" this.handleInput}}
+      {{on "compositionstart" this.handleCompositionStart}}
+      {{on "compositionend" this.handleCompositionEnd}}
       {{on "keydown" this.handleKeyDown}}
       {{on "paste" this.handlePaste}}
     ></div>

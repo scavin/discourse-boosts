@@ -14,6 +14,38 @@ module PageObjects
         self
       end
 
+      def editor_text
+        find(".discourse-boosts__input-container .discourse-boosts__input").text
+      end
+
+      def has_editor_text?(text)
+        has_css?(".discourse-boosts__input-container .discourse-boosts__input", text: text)
+      end
+
+      def start_boost_composition(text)
+        page.execute_script(<<~JS)
+          const editor = document.querySelector(".discourse-boosts__input-container .discourse-boosts__input");
+          editor.focus();
+          editor.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+          editor.textContent = #{text.to_json};
+          editor.dispatchEvent(new InputEvent("input", {
+            bubbles: true,
+            data: #{text.to_json},
+            inputType: "insertCompositionText",
+            isComposing: true
+          }));
+        JS
+        self
+      end
+
+      def end_boost_composition
+        page.execute_script(<<~JS)
+          const editor = document.querySelector(".discourse-boosts__input-container .discourse-boosts__input");
+          editor.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+        JS
+        self
+      end
+
       def submit_boost
         find(".discourse-boosts__submit").click
         self
