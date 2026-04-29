@@ -212,6 +212,10 @@ module PageObjects
         has_no_css?("#post_#{post.post_number} .discourse-boosts")
       end
 
+      def has_no_boost?(post)
+        has_no_boosts?(post)
+      end
+
       def has_post_menu_boost_button?(post)
         has_css?("#post_#{post.post_number} .post-action-menu__boost")
       end

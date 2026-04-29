@@ -36,7 +36,7 @@ describe "Flagging a boost" do
 
     review_page.select_bundled_action(
       reviewable,
-      I18n.t("discourse_boosts.reviewables.actions.agree_and_delete.title"),
+      :agree_and_delete,
       bundle_index: 1,
     )
 
