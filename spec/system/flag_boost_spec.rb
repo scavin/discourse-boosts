@@ -36,7 +36,7 @@ describe "Flagging a boost" do
 
     review_page.select_bundled_action(
       reviewable,
-      :agree_and_delete,
+      "#{reviewable.target_type.underscore}-agree_and_delete",
       bundle_index: 1,
     )
 
