@@ -3,7 +3,7 @@ name: Discourse Plugin
 on:
   push:
     branches:
-      - beta
+      - main
   pull_request:
 
 jobs:
