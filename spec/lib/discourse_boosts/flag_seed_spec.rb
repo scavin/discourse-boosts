@@ -2,7 +2,7 @@
 
 require "rails_helper"
 
-RSpec.describe Flag, "seed for DiscourseBoosts::Boost" do
+RSpec.describe Flag do
   def run_seed
     # The fixture must be re-run in each example; require_relative would cache it.
     # rubocop:disable Discourse/Plugins/UseRequireRelative
