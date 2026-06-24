@@ -27,8 +27,12 @@ function getStats(element) {
     if (node.nodeType === Node.TEXT_NODE) {
       const text = node.textContent;
       const unicodeMatches = text.match(UNICODE_EMOJI_REGEX);
-      emojiCount += unicodeMatches?.length || 0;
-      length += getTextVisibleLength(text);
+      if (unicodeMatches) {
+        emojiCount += unicodeMatches.length;
+        length += text.replace(UNICODE_EMOJI_REGEX, "x").length;
+      } else {
+        length += text.length;
+      }
     } else if (node.nodeName === "IMG" && node.classList.contains("emoji")) {
       length += 1;
       emojiCount += 1;
@@ -73,145 +77,38 @@ function placeCursorAtEnd(element) {
   sel.addRange(range);
 }
 
-function getTextVisibleLength(text) {
-  return text.replace(UNICODE_EMOJI_REGEX, "x").length;
-}
-
-function getTextOffsetForVisibleOffset(text, visibleOffset) {
-  const offset = Math.max(0, visibleOffset ?? 0);
-  let actualIndex = 0;
-  let visibleIndex = 0;
-
-  for (const match of text.matchAll(UNICODE_EMOJI_REGEX)) {
-    const emojiIndex = match.index;
-    const plainTextLength = emojiIndex - actualIndex;
-
-    if (offset <= visibleIndex + plainTextLength) {
-      return actualIndex + (offset - visibleIndex);
-    }
-
-    visibleIndex += plainTextLength;
-    if (offset <= visibleIndex + 1) {
-      return emojiIndex + match[0].length;
-    }
-
-    actualIndex = emojiIndex + match[0].length;
-    visibleIndex += 1;
-  }
-
-  return Math.min(text.length, actualIndex + (offset - visibleIndex));
-}
-
-function getSelectionOffset(container) {
-  const selection = window.getSelection();
-
-  if (!selection?.rangeCount) {
-    return null;
-  }
-
-  const range = selection.getRangeAt(0);
-  if (!container.contains(range.startContainer)) {
-    return null;
-  }
-
-  const preRange = document.createRange();
-  preRange.selectNodeContents(container);
-  preRange.setEnd(range.startContainer, range.startOffset);
-  return serializeRangeContents(preRange);
-}
-
-function serializeRangeContents(range) {
-  return getStats(range.cloneContents()).length;
-}
-
-function setSelectionOffset(container, targetOffset) {
-  const selection = window.getSelection();
-  const range = document.createRange();
-  const offset = Math.max(0, targetOffset ?? 0);
-  let traversed = 0;
-  const walker = document.createTreeWalker(
-    container,
-    NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT,
-    {
-      acceptNode(node) {
-        if (node.nodeType === Node.TEXT_NODE) {
-          return NodeFilter.FILTER_ACCEPT;
-        }
-
-        if (node.nodeName === "IMG" && node.classList.contains("emoji")) {
-          return NodeFilter.FILTER_ACCEPT;
-        }
-
-        return NodeFilter.FILTER_SKIP;
-      },
-    }
-  );
-
-  let node;
-  while ((node = walker.nextNode())) {
-    if (node.nodeType === Node.TEXT_NODE) {
-      const textLength = getTextVisibleLength(node.textContent);
-      if (offset <= traversed + textLength) {
-        range.setStart(
-          node,
-          getTextOffsetForVisibleOffset(node.textContent, offset - traversed)
-        );
-        range.collapse(true);
-        selection.removeAllRanges();
-        selection.addRange(range);
-        return;
-      }
-      traversed += textLength;
-    } else if (node.nodeName === "IMG" && node.classList.contains("emoji")) {
-      if (offset <= traversed + 1) {
-        if (offset === traversed) {
-          range.setStartBefore(node);
-        } else {
-          range.setStartAfter(node);
-        }
-        range.collapse(true);
-        selection.removeAllRanges();
-        selection.addRange(range);
-        return;
-      }
-      traversed += 1;
-    }
-  }
-
-  placeCursorAtEnd(container);
-}
-
 export default class BoostEditor extends Component {
   @tracked canAddEmoji = true;
 
   #editor = null;
-  #isComposing = false;
-  #isApplyingValidation = false;
-  #mutationObserver = null;
   #previousHTML = "";
-  #previousSelectionOffset = 0;
-
-  willDestroy() {
-    super.willDestroy(...arguments);
-    this.#mutationObserver?.disconnect();
-  }
+  #isComposing = false;
 
   @action
   setup(element) {
     this.#editor = element;
-    this.#observeEditorMutations();
-    this.#previousHTML = element.innerHTML;
     next(() => element.focus());
   }
 
   @action
-  handleInput() {
-    if (this.#isComposing) {
-      this.#syncEditorState(getStats(this.#editor));
+  handleInput(event) {
+    if (event?.isComposing || this.#isComposing) {
       return;
     }
 
-    this.#enforceFinalizedInput();
+    this.#processEmojiShortcodes();
+
+    const stats = getStats(this.#editor);
+    if (stats.length > MAX_LENGTH || stats.emojiCount > MAX_EMOJI) {
+      this.#editor.innerHTML = this.#previousHTML;
+      placeCursorAtEnd(this.#editor);
+      return;
+    }
+
+    this.#previousHTML = this.#editor.innerHTML;
+    const value = serialize(this.#editor);
+    this.#updateCanAddEmoji(stats);
+    this.args.onChange?.(value);
   }
 
   @action
@@ -222,15 +119,11 @@ export default class BoostEditor extends Component {
   @action
   handleCompositionEnd() {
     this.#isComposing = false;
-    this.#enforceFinalizedInput();
+    this.handleInput();
   }
 
   @action
   handleKeyDown(event) {
-    if (this.#isComposing || event.isComposing || event.keyCode === 229) {
-      return;
-    }
-
     if (event.key === "Enter") {
       event.preventDefault();
       this.args.onSubmit?.();
@@ -245,9 +138,6 @@ export default class BoostEditor extends Component {
     event.preventDefault();
     const text = event.clipboardData.getData("text/plain");
     document.execCommand("insertText", false, text);
-    if (!this.#isComposing) {
-      this.#enforceFinalizedInput();
-    }
   }
 
   @action
@@ -270,9 +160,9 @@ export default class BoostEditor extends Component {
     this.#editor.appendChild(createEmojiImg(code));
     placeCursorAtEnd(this.#editor);
     this.#previousHTML = this.#editor.innerHTML;
-    const newStats = getStats(this.#editor);
-    this.#previousSelectionOffset = newStats.length;
-    this.#syncEditorState(newStats);
+    const value = serialize(this.#editor);
+    this.#updateCanAddEmoji(getStats(this.#editor));
+    this.args.onChange?.(value);
   }
 
   @action
@@ -284,67 +174,6 @@ export default class BoostEditor extends Component {
     const spaceNeeded = this.#editor.childNodes.length > 0 ? 2 : 1;
     this.canAddEmoji =
       stats.length + spaceNeeded <= MAX_LENGTH && stats.emojiCount < MAX_EMOJI;
-  }
-
-  #enforceFinalizedInput() {
-    if (this.#isApplyingValidation || this.#isComposing) {
-      return;
-    }
-
-    const currentHTML = this.#editor.innerHTML;
-    if (currentHTML === this.#previousHTML) {
-      return;
-    }
-
-    this.#isApplyingValidation = true;
-    try {
-      const selectionOffset = getSelectionOffset(this.#editor);
-      this.#processEmojiShortcodes();
-
-      const stats = getStats(this.#editor);
-      if (stats.length > MAX_LENGTH || stats.emojiCount > MAX_EMOJI) {
-        this.#editor.innerHTML = this.#previousHTML;
-        setSelectionOffset(this.#editor, this.#previousSelectionOffset);
-        this.#syncEditorState(getStats(this.#editor));
-        return;
-      }
-
-      this.#previousHTML = this.#editor.innerHTML;
-      this.#previousSelectionOffset = Math.min(
-        selectionOffset ?? stats.length,
-        stats.length
-      );
-      this.#syncEditorState(stats);
-    } finally {
-      this.#isApplyingValidation = false;
-    }
-  }
-
-  #observeEditorMutations() {
-    this.#mutationObserver = new MutationObserver(() => {
-      if (this.#isApplyingValidation) {
-        return;
-      }
-
-      if (this.#isComposing) {
-        this.#syncEditorState(getStats(this.#editor));
-        return;
-      }
-
-      this.#enforceFinalizedInput();
-    });
-
-    this.#mutationObserver.observe(this.#editor, {
-      childList: true,
-      subtree: true,
-      characterData: true,
-    });
-  }
-
-  #syncEditorState(stats) {
-    const value = serialize(this.#editor);
-    this.#updateCanAddEmoji(stats);
-    this.args.onChange?.(value);
   }
 
   #processEmojiShortcodes() {
