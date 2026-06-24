@@ -9,7 +9,7 @@ RSpec.describe DiscourseBoosts::Boost::Create do
   describe ".call" do
     subject(:result) { described_class.call(params:, **dependencies) }
 
-    fab!(:acting_user, :user)
+    fab!(:acting_user) { Fabricate(:user, refresh_auto_groups: true) }
     fab!(:post_author, :user)
     fab!(:category)
     fab!(:topic) { Fabricate(:topic, category: category) }

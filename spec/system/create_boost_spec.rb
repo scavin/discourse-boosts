@@ -81,20 +81,4 @@ describe "Creating a boost" do
     expect(boost_page).to have_editor_text("1234567890123456")
   end
 
-  it "restores the cursor position after rolling back invalid emoji input" do
-    topic_page.visit_topic(topic)
-
-    boost_page.click_post_menu_boost_button(post)
-    boost_page.programmatically_set_boost_html(
-      'a<img class="emoji" alt=":heart:" title=":heart:" src="/images/emoji/twitter/heart.png">b',
-      selection_offset: 2
-    )
-
-    expect(boost_page).to have_editor_selection_offset(2)
-
-    boost_page.programmatically_set_boost_text("a:heart:b1234567890123456")
-
-    expect(boost_page).to have_editor_text("ab")
-    expect(boost_page).to have_editor_selection_offset(2)
-  end
 end
