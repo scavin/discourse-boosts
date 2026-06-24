@@ -19,6 +19,8 @@ RSpec.describe DiscourseBoosts::Boost::Create do
     let(:dependencies) { { guardian: acting_user.guardian } }
     let(:raw) { "🎉" }
 
+    before { SiteSetting.discourse_boosts_enabled = true }
+
     context "when contract is invalid" do
       let(:raw) { "" }
 
